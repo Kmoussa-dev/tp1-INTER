@@ -1,0 +1,240 @@
+= TP soap
+Frédéric Moal, 17-01-2023
+
+
+*But de ce TP*
+
+Écrire et publier un WebService SOAP (serveur) en *code first* et le tester.
+
+Ecrire un client en Java pour ce WebService.
+
+
+
+== Exercice 1 : un serveur de WebServices avec un JDK standalone
+
+On va utiliser ici uniquement un JDK avec les librairies Jakarta sans serveur.
+
+=== Etape 1 : création d'un webservice d'annuaire téléphonique [serveur]
+
+. Créez un projet maven de type pom, puis ajoutez un module maven `exo1-serveur` dans le projet
+
+. Ajoutez dans un package "modele" les classes du domaine en générant les méthodes nécessaires :
++
+[source,java]
+----
+public class Personne {
+    private String nom;
+    private String prenom;
+    private List<Contact> contacts;
+}
+public class Contact {
+    private String type;
+    private String adresse;
+    private Personne personne; // pointeur back vers la personne
+}
+----
+
+. Ajoutez dans un package "service" (on se passe de DAO ici) l'interface Facade correspondant à la classe FacadeImpl suivante :
++
+[source,java]
+----
+import modele.Personne;
+
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
+
+public class FacadeImpl implements Facade {
+    private static Map<String, Personne> annuaire = new HashMap<>();
+    static {
+        Personne fred = new Personne("moal", "frederic");
+        fred.addContact(new Contact("tel", "0238000000", fred));
+        fred.addContact(new Contact("mail", "frederic.moal@univ-orleans.fr", fred));
+        annuaire.put(fred.getNom(), fred);
+
+        final Personne matthieu = new Personne("exbrayat", "matthieu");
+        matthieu.addContact(new Contact("tel","0202020202", matthieu));
+        annuaire.put(matthieu.getNom(), matthieu);
+
+        final Personne yohan = new Personne("yohan", "boichut");
+        matthieu.addContact(new Contact("mail","yohan.boichut@univ-orleans.fr", yohan));
+        annuaire.put(yohan.getNom(), yohan);
+    };
+    @Override
+    public String searchTelephone(String nom) {
+        Personne p =  annuaire.get(nom);
+        if (p==null) {
+            return "Pas trouve";
+        }
+        return p.getContacts().stream().filter(c->c.getType().startsWith("tel")).findAny().get().getAdresse();
+    }
+    @Override
+    public Personne searchPersonne(String nom) {
+        return annuaire.get(nom);
+    }
+    @Override
+    public void addPersonne(Personne p) {
+        annuaire.put(p.getNom(), p);
+    }
+    @Override
+    public void addPersonneList(String nom, String prenom, String tel) {
+        Personne p = new Personne(nom,prenom);
+        annuaire.put(p.getNom(), p);
+    }
+    @Override
+    public Collection<String> getAllNom() {
+        return annuaire.keySet();
+    }
+}
+----
+
+. Ajoutez dans les dépendances du pom les librairies Jakarta
++
+[source,xml]
+----
+        <dependency>
+            <groupId>jakarta.xml.ws</groupId>
+            <artifactId>jakarta.xml.ws-api</artifactId>
+            <version>4.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.sun.xml.ws</groupId>
+            <artifactId>jaxws-rt</artifactId>
+            <version>4.0.0</version>
+            <scope>runtime</scope>
+        </dependency>
+----
+
+. Annotez les classes pour définir la facade comme Web service (JSR 181)
+
+. Ajoutez un main dans votre projet (main.RunServeur) permettant de publier votre webservice
++
+[source,java]
+----
+    public static void main(String[] args) {
+        Facade server = new FacadeImpl();
+        Endpoint endpoint = Endpoint.publish("http://localhost:9191/annuaire",server);
+        System.out.println("Serveur lancé en attente de connexions...");
+    }
+----
+Exécutez votre main pour lancer le serveur
+
+Voilà, vous venez de publier votre premier webservice SOAP.
+
+La description de son interface est accessible à son URL de publication : http://localhost:9191/annuaire?wsdl
+
+
+
+=== Etape 2 : appels de ce webservice d'annuaire téléphonique avec des clients universels
+
+. Téléchargez et installez la version _open source_ de SoapUI (https://www.soapui.org/tools/soapui/)
+
+. Votre serveur toujours en cours d'exécution, testez les méthodes de votre service depuis SoapUI en créant un nouveau projet
+SOAP et en chargeant le WSDL du service déployé
+[attention, il peut être nécessaire de désactiver le proxy automatique de SoapUI].
+
+
+=== Etape 3 : gestion des erreurs
+
+Modifiez ce service pour lever une exception quand le nom n'est pas trouvé lors d'une recherche.
+
+Tester ce nouveau service.
+
+
+== Exercice 2 : écriture d'un client Java Soap pour ce service
+
+Pour la création du client Java :
+
+. ajoutez un nouveau module maven dans votre projet IntelliJ pour le client
+
+. ajoutez un répertoire src-gen/main/java dans ce module ; flaguez ce nouveau répertoire java comme "Generated Sources Root" dans IntelliJ (click droit sur le répertoire, mark directory as, ...)
+
+. Pour générer le code Java proxy à partir du wsdl pour accéder au serveur, il faut ajouter les mêmes dépendances que pour le serveur pour la librairie Jakarta de support des Webservices, mais également un plugin maven pour lancer le générateur, en précisant où est le wsdl, mais aussi où générer le code Java (répertoire et package)
++
+[source,xml]
+----
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.sun.xml.ws</groupId>
+                <artifactId>jaxws-maven-plugin</artifactId>
+                <version>4.0.0</version>
+                <configuration>
+                    <wsdlUrls>
+                        <wsdlUrl>http://localhost:9191/annuaire?wsdl</wsdlUrl>
+                    </wsdlUrls>
+                    <keep>true</keep>
+                    <packageName>services</packageName>
+                    <sourceDestDir>src-gen/main/java</sourceDestDir>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+----
+
+. faites un refresh sous IntelliJ pour voir le code généré par wsimport
+
+. ajoutez une classe avec un main pour l'appel statique à vos services (ajustez le code en fonction du nom choisi pour service) :
++
+[source,java]
+----
+public static void main(String[] args) {
+    FacadeService service = new FacadeService();
+    Facade proxy = service.getFacadePort();
+    System.out.println("liste : "+proxy.getAllNom());
+}
+----
+
+. testez avec un appel avec url dynamique, en passant l'URL du webservice en argument de la ligne de commande :
+[source,java]
+----
+try {
+    URL url = new URL("http://localhost:9191/annuaire?wsdl");
+    FacadeService serviceWithUrl =
+        new facadeService(url, new QName("http://service/","FacadeService"));
+    Facade servicePortWithUrl = serviceWithUrl.getFacadePort();
+    System.out.println(servicePortWithUrl.getAllNom());
+} catch (MalformedURLException e) {
+    e.printStackTrace();
+}
+----
+
+
+
+
+Il n'est évidement pas raisonnable de déployer un serveur de web services sur un JDK ; on va donc refaire ce service en version Spring Boot.
+
+Arrêtez le précédent service déployé par le JDK.
+
+
+== Exercice 3 - serveur de WebServices avec Spring Boot
+
+=== Etape 1 : un *vrai* serveur Soap
+
+Dans cette architecture, c'est un serveur Spring Boot (Tomcat) qui va déployer les webservices grâce aux annotations dans la Façade.
+
+Nouveau projet Spring Boot Initializer, en version 3.0.1, maven, jdk 17, sans sélectionner *aucun module*.
+
+Ajoutez ensuite au pom.xml la dépendance au starter Spring Boot CXF, en définissant la version de CXF à 4.0.0 :
+
+[source,xml]
+----
+<dependency>
+    <groupId>org.apache.cxf</groupId>
+    <artifactId>cxf-spring-boot-starter-jaxws</artifactId>
+    <version>${cxf.version}</version>
+</dependency>
+----
+
+Ajoutez une implémentation pour le service d'annuaire ; reprenez l'implémentation précédente.
+
+Ajoutez l'enregistrement du Endpoint sur "/annuaire" dans la configuration de SpringBoot.
+
+Testez avec SoapUI le service déployé sur http://localhost:8080/services/annuaire?wsdl
+
+=== Etape 2 : on profite pour RESTer maintenant !
+
+Vous avez un serveur Springboot qui déploie votre API en Soap,
+donc profitez en pour déployer la même API en REST !
+
+Ajoutez le(s) controleurs REST permettant d'effectuer les mêmes opérations sur la façade, mais avec des appels REST.
